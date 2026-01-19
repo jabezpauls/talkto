@@ -13,16 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAILLM(BaseLLM):
-    """OpenAI LLM provider"""
+    """OpenAI-compatible LLM provider (works with OpenAI, OpenRouter, Gemini, etc.)"""
 
-    def __init__(self, model: str = "gpt-4.1-mini", api_key: str = None):
+    def __init__(self, model: str = "gpt-4o-mini", api_key: str = None, base_url: str = None):
         super().__init__(model)
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self.base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         self._client = None
 
         if not self.api_key:
             raise ConfigurationError(
-                "OpenAI API key not found. Set OPENAI_API_KEY environment variable."
+                "API key not found. Set api_key in config or OPENAI_API_KEY env var."
             )
 
     @property
@@ -31,7 +32,7 @@ class OpenAILLM(BaseLLM):
         if self._client is None:
             try:
                 from openai import OpenAI
-                self._client = OpenAI(api_key=self.api_key)
+                self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
             except ImportError:
                 raise LLMError(
                     "openai package not installed. Install with: pip install openai"

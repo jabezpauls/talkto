@@ -3,15 +3,16 @@ import { join } from 'path';
 import yaml from 'js-yaml';
 import { getDefaultStoragePath } from './utils/paths.js';
 
+export interface ProviderConfig {
+  provider?: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
 export interface TalktoConfig {
-  embedding?: {
-    provider?: string;
-    model?: string;
-  };
-  llm?: {
-    provider?: string;
-    model?: string;
-  };
+  embedding?: ProviderConfig;
+  llm?: ProviderConfig;
 }
 
 const DEFAULT_CONFIG: TalktoConfig = {
@@ -82,12 +83,21 @@ export function getExampleConfig(): string {
 embedding:
   provider: ollama          # ollama or openai
   model: nomic-embed-text   # Model name
+  # api_key: your-key-here  # For OpenAI-compatible APIs
+  # base_url: https://...   # Custom API endpoint (OpenRouter, etc.)
 
 # LLM provider for chat
 llm:
   provider: ollama          # ollama or openai
   model: llama3.1:8b        # Model name
+  # api_key: your-key-here  # For OpenAI-compatible APIs
+  # base_url: https://...   # Custom API endpoint (OpenRouter, Gemini, etc.)
 
-# For OpenAI, set OPENAI_API_KEY environment variable
+# Example: Using Google Gemini via OpenAI-compatible API
+# llm:
+#   provider: openai
+#   model: gemini-2.0-flash
+#   api_key: your-gemini-key
+#   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
 `;
 }

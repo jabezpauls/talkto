@@ -109,7 +109,7 @@ async function talkto(targetPath: string, options: TalktoOptions): Promise<void>
   try {
     await bridge.start();
 
-    // Send configuration to engine
+    // Send configuration to engine (merge CLI options with global config)
     await bridge.send({
       action: 'config',
       options: {
@@ -118,10 +118,14 @@ async function talkto(targetPath: string, options: TalktoOptions): Promise<void>
           embedding: {
             provider: options.embedding,
             model: options.embeddingModel,
+            api_key: globalConfig.embedding?.api_key,
+            base_url: globalConfig.embedding?.base_url,
           },
           llm: {
             provider: options.llm,
             model: options.model,
+            api_key: globalConfig.llm?.api_key,
+            base_url: globalConfig.llm?.base_url,
           },
         },
       },
