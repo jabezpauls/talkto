@@ -1,0 +1,15 @@
+{
+  "name": "rag-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=packages/cli",
+    "dev": "npm run dev --workspace=packages/cli",
+    "test": "npm run test --workspace=packages/cli"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
