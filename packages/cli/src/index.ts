@@ -48,6 +48,100 @@ program
 
 program.parse();
 
+interface IndexRecord {
+  hash: string;
+  last_indexed: string | null;
+  chunk_count: number;
+  file_count: number;
+}
+
+async function indexesCommand(options: {
+  clean?: boolean;
+  olderThan: string;
+  yes?: boolean;
+}): Promise<void> {
+  const bridge = new EngineBridge();
+  try {
+    await bridge.start();
+  } catch (error) {
+    console.error(chalk.red(`Failed to start engine: ${error}`));
+    process.exit(1);
+  }
+
+  try {
+    const result = await bridge.send<{ indexes: IndexRecord[] }>({
+      action: 'list_indexes',
+    });
+
+    const indexes = result?.indexes ?? [];
+
+    if (indexes.length === 0) {
+      console.log(chalk.gray('No indexes found in ~/.talkto/indexes/'));
+      return;
+    }
+
+    console.log(chalk.bold('\nStored indexes:'));
+    console.log('');
+    for (const idx of indexes) {
+      const date = idx.last_indexed
+        ? new Date(idx.last_indexed).toLocaleDateString()
+        : 'unknown';
+      console.log(
+        `  ${chalk.cyan(idx.hash)}  last indexed: ${date}  ` +
+        `${idx.chunk_count} chunks  ${idx.file_count} files`
+      );
+    }
+    console.log('');
+
+    if (!options.clean) {
+      return;
+    }
+
+    // Filter indexes older than N days
+    const days = parseInt(options.olderThan, 10);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+
+    const toDelete = indexes.filter((idx) => {
+      if (!idx.last_indexed) return true;
+      return new Date(idx.last_indexed) < cutoff;
+    });
+
+    if (toDelete.length === 0) {
+      console.log(chalk.green(`No indexes older than ${days} days found.`));
+      return;
+    }
+
+    console.log(chalk.yellow(`Found ${toDelete.length} index(es) older than ${days} days:`));
+    for (const idx of toDelete) {
+      const date = idx.last_indexed
+        ? new Date(idx.last_indexed).toLocaleDateString()
+        : 'unknown';
+      console.log(`  ${chalk.red(idx.hash)}  (${date})`);
+    }
+    console.log('');
+
+    if (!options.yes) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question('Delete these indexes? [y/N] ', resolve);
+      });
+      rl.close();
+      if (answer.toLowerCase() !== 'y') {
+        console.log(chalk.gray('Cancelled.'));
+        return;
+      }
+    }
+
+    for (const idx of toDelete) {
+      await bridge.send({ action: 'delete_index', options: { hash: idx.hash } });
+      console.log(chalk.green(`Deleted: ${idx.hash}`));
+    }
+  } finally {
+    await bridge.stop();
+  }
+}
+
 async function configCommand(options: { init?: boolean }): Promise<void> {
   const { getConfigPath, getExampleConfig, loadGlobalConfig } = await import('./config.js');
   const configPath = getConfigPath();
