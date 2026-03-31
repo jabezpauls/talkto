@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as readline from 'readline';
@@ -45,6 +46,12 @@ program
   .option('--older-than <days>', 'Remove indexes older than N days (default: 30)', '30')
   .option('--yes', 'Skip confirmation prompt')
   .action(indexesCommand);
+
+// Setup / onboarding subcommand
+program
+  .command('setup')
+  .description('Check Ollama status, installed models, and pull missing ones')
+  .action(setupCommand);
 
 program.parse();
 
@@ -141,6 +148,143 @@ async function indexesCommand(options: {
     await bridge.stop();
   }
 }
+
+// ---------------------------------------------------------------------------
+// talkto setup — Ollama onboarding
+// ---------------------------------------------------------------------------
+
+const OLLAMA_URL = 'http://localhost:11434';
+const REQUIRED_EMBED_MODEL = 'nomic-embed-text';
+const SUGGESTED_CHAT_MODEL = 'llama3.1:8b';
+
+interface OllamaModel {
+  name: string;
+  size: number;
+}
+
+async function checkOllama(): Promise<OllamaModel[] | null> {
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const data = await res.json() as { models: OllamaModel[] };
+    return data.models ?? [];
+  } catch {
+    return null;
+  }
+}
+
+function ollamaPull(model: string): boolean {
+  console.log(chalk.gray(`  Pulling ${model} (this may take a while)...\n`));
+  const result = spawnSync('ollama', ['pull', model], { stdio: 'inherit' });
+  return result.status === 0;
+}
+
+async function setupCommand(): Promise<void> {
+  console.log('');
+  console.log(chalk.bold.cyan('  talkto setup'));
+  console.log(chalk.gray('  ─────────────────────────────────────'));
+  console.log('');
+
+  // ── 1. Ollama running? ──────────────────────────────────────────────────
+  const spinner = ora('Checking Ollama...').start();
+  const models = await checkOllama();
+
+  if (models === null) {
+    spinner.fail(chalk.red('Ollama is not running'));
+    console.log('');
+    console.log(chalk.bold('  Install Ollama:'));
+    console.log(chalk.gray('    https://ollama.com/download'));
+    console.log('');
+    console.log(chalk.bold('  Then start it:'));
+    console.log(chalk.gray('    ollama serve'));
+    console.log('');
+    console.log(chalk.gray('  Once Ollama is running, re-run: ') + chalk.cyan('talkto setup'));
+    console.log('');
+    process.exit(1);
+  }
+
+  const modelNames = models.map((m) => m.name);
+  spinner.succeed(chalk.green(`Ollama is running`) + chalk.gray(`  (${models.length} model(s) installed)`));
+  console.log('');
+
+  // ── 2. Show installed models ────────────────────────────────────────────
+  if (models.length > 0) {
+    console.log(chalk.bold('  Installed models:'));
+    for (const m of models) {
+      const sizeMB = Math.round(m.size / 1024 / 1024);
+      const sizeStr = sizeMB > 1024
+        ? `${(sizeMB / 1024).toFixed(1)} GB`
+        : `${sizeMB} MB`;
+      console.log(`    ${chalk.cyan(m.name.padEnd(35))} ${chalk.gray(sizeStr)}`);
+    }
+    console.log('');
+  } else {
+    console.log(chalk.yellow('  No models installed yet.'));
+    console.log('');
+  }
+
+  // ── 3. Embedding model check ────────────────────────────────────────────
+  const hasEmbed = modelNames.some((n) => n.startsWith(REQUIRED_EMBED_MODEL));
+
+  if (hasEmbed) {
+    console.log(`  ${chalk.green('✔')} Embedding model: ${chalk.cyan(REQUIRED_EMBED_MODEL)}`);
+  } else {
+    console.log(`  ${chalk.red('✘')} Embedding model: ${chalk.cyan(REQUIRED_EMBED_MODEL)} — not installed`);
+    console.log(chalk.gray('    (Required for indexing files)'));
+    console.log('');
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>((resolve) => {
+      rl.question(chalk.yellow(`  Pull ${REQUIRED_EMBED_MODEL} now? [Y/n] `), resolve);
+    });
+    rl.close();
+    console.log('');
+
+    if (answer.trim().toLowerCase() !== 'n') {
+      const ok = ollamaPull(REQUIRED_EMBED_MODEL);
+      if (ok) {
+        console.log(`  ${chalk.green('✔')} ${REQUIRED_EMBED_MODEL} installed`);
+      } else {
+        console.log(chalk.red(`  Failed to pull ${REQUIRED_EMBED_MODEL}.`));
+        console.log(chalk.gray(`  Try manually: ollama pull ${REQUIRED_EMBED_MODEL}`));
+      }
+    } else {
+      console.log(chalk.gray(`  Skipped. Run later: ollama pull ${REQUIRED_EMBED_MODEL}`));
+    }
+    console.log('');
+  }
+
+  // ── 4. Chat model check ─────────────────────────────────────────────────
+  const chatModels = modelNames.filter((n) => !n.startsWith(REQUIRED_EMBED_MODEL));
+
+  if (chatModels.length > 0) {
+    const display = chatModels.slice(0, 3).join(', ');
+    const extra = chatModels.length > 3 ? ` +${chatModels.length - 3} more` : '';
+    console.log(`  ${chalk.green('✔')} Chat model(s): ${chalk.cyan(display)}${chalk.gray(extra)}`);
+  } else {
+    console.log(`  ${chalk.yellow('⚠')}  No chat models installed`);
+    console.log(chalk.gray(`    talkto defaults to: ${SUGGESTED_CHAT_MODEL}`));
+    console.log(chalk.gray(`    Install it:  ollama pull ${SUGGESTED_CHAT_MODEL}`));
+    console.log(chalk.gray(`    Smaller alt: ollama pull phi3`));
+  }
+
+  // ── 5. Summary ──────────────────────────────────────────────────────────
+  console.log('');
+  console.log(chalk.bold('  ─────────────────────────────────────'));
+
+  const ready = hasEmbed && chatModels.length > 0;
+  if (ready) {
+    console.log(`  ${chalk.green.bold('Ready!')}  Try:`);
+    console.log(`    ${chalk.cyan('talkto ./my-project')}`);
+    console.log(`    ${chalk.cyan('talkto ./docs -q "What is the API?"')}`);
+  } else {
+    console.log(`  ${chalk.yellow('Almost there.')}  Install the missing model(s) above, then run:`);
+    console.log(`    ${chalk.cyan('talkto setup')}`);
+  }
+  console.log('');
+}
+
+// ---------------------------------------------------------------------------
 
 async function configCommand(options: { init?: boolean }): Promise<void> {
   const { getConfigPath, getExampleConfig, loadGlobalConfig } = await import('./config.js');

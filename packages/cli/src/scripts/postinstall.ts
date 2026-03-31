@@ -65,7 +65,13 @@ async function setup(): Promise<void> {
   }
 
   console.log('[talkto] Engine setup complete!');
-  console.log('[talkto] To use OpenAI/Gemini models, run:');
+  console.log('');
+  console.log('[talkto] Next steps:');
+  console.log('[talkto]   1. Install Ollama if you haven\'t: https://ollama.com/download');
+  console.log('[talkto]   2. Run: talkto setup   (checks Ollama and pulls required models)');
+  console.log('[talkto]   3. Run: talkto ./your-project');
+  console.log('');
+  console.log('[talkto] To use OpenAI/Gemini instead of Ollama:');
   console.log(`[talkto]   "${pip}" install openai`);
 }
 
