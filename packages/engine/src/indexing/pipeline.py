@@ -38,8 +38,10 @@ class IndexingPipeline:
         """
         self.config = config
         self._loader_registry = get_registry()
-        self._text_chunker = RecursiveTextSplitter()
-        self._code_chunker = CodeChunker()
+        chunk_size = config.get("index", {}).get("chunk_size", 500)
+        chunk_overlap = config.get("index", {}).get("chunk_overlap", 50)
+        self._text_chunker = RecursiveTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        self._code_chunker = CodeChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         self._embedding = None
         self._vector_store = None
 

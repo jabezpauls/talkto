@@ -13,6 +13,11 @@ import type { IndexResponse, QueryResponse, StreamChunk } from './types/index.js
 // Load global config for defaults
 const globalConfig = loadGlobalConfig();
 
+// Constants used by setup command — must be declared before program.parse()
+const OLLAMA_URL = 'http://localhost:11434';
+const REQUIRED_EMBED_MODEL = 'nomic-embed-text';
+const SUGGESTED_CHAT_MODEL = 'llama3.1:8b';
+
 const program = new Command();
 
 program
@@ -29,6 +34,7 @@ program
   .option('--embedding <provider>', 'Embedding provider (ollama, openai)', globalConfig.embedding?.provider || 'ollama')
   .option('--embedding-model <model>', 'Embedding model name', globalConfig.embedding?.model || 'nomic-embed-text')
   .option('-q, --query <question>', 'Ask a single question (non-interactive)')
+  .option('--voice', 'Enable voice input/output mode (requires: talkto setup --voice)')
   .action(talkto);
 
 // Config subcommand
@@ -51,6 +57,7 @@ program
 program
   .command('setup')
   .description('Check Ollama status, installed models, and pull missing ones')
+  .option('--voice', 'Download voice models (whisper ASR + piper TTS, ~150 MB)')
   .action(setupCommand);
 
 program.parse();
@@ -153,10 +160,6 @@ async function indexesCommand(options: {
 // talkto setup — Ollama onboarding
 // ---------------------------------------------------------------------------
 
-const OLLAMA_URL = 'http://localhost:11434';
-const REQUIRED_EMBED_MODEL = 'nomic-embed-text';
-const SUGGESTED_CHAT_MODEL = 'llama3.1:8b';
-
 interface OllamaModel {
   name: string;
   size: number;
@@ -179,7 +182,7 @@ function ollamaPull(model: string): boolean {
   return result.status === 0;
 }
 
-async function setupCommand(): Promise<void> {
+async function setupCommand(options: { voice?: boolean }): Promise<void> {
   console.log('');
   console.log(chalk.bold.cyan('  talkto setup'));
   console.log(chalk.gray('  ─────────────────────────────────────'));
@@ -282,6 +285,12 @@ async function setupCommand(): Promise<void> {
     console.log(`    ${chalk.cyan('talkto setup')}`);
   }
   console.log('');
+
+  // ── 6. Voice setup (optional) ────────────────────────────────────────────
+  if (options.voice) {
+    const { voiceSetup } = await import('./voice/setup.js');
+    await voiceSetup();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +336,7 @@ interface TalktoOptions {
   embedding: string;
   embeddingModel: string;
   query?: string;
+  voice?: boolean;
 }
 
 async function talkto(targetPath: string, options: TalktoOptions): Promise<void> {
@@ -443,6 +453,53 @@ async function talkto(targetPath: string, options: TalktoOptions): Promise<void>
   // Interactive chat mode
   console.log('');
   console.log(chalk.bold(`Talking to ${chalk.cyan(targetPath)}`));
+  console.log('');
+
+  // ── Voice mode ────────────────────────────────────────────────────────────
+  if (options.voice) {
+    const { VoiceManager } = await import('./voice/index.js');
+    const voice = new VoiceManager();
+    let voiceReady = false;
+
+    try {
+      await voice.init();
+      voiceReady = true;
+    } catch (err) {
+      console.error(chalk.red(`Voice init failed: ${err}`));
+      console.log(chalk.gray('Run "talkto setup --voice" to download required models.'));
+      console.log(chalk.gray('Falling back to text mode...\n'));
+    }
+
+    if (voiceReady) {
+      console.log(chalk.gray('Voice mode active. Press SPACE to talk, Q to quit.'));
+
+      const voiceLoop = async (): Promise<void> => {
+        const text = await voice.listen();
+
+        if (text === '__quit__') {
+          voice.dispose();
+          console.log('');
+          console.log(chalk.gray('Goodbye!'));
+          await bridge.stop();
+          process.exit(0);
+        }
+
+        if (!text) {
+          voiceLoop();
+          return;
+        }
+
+        await handleQuery(bridge, text, voice);
+        voiceLoop();
+      };
+
+      voiceLoop();
+      return;
+    }
+    // Fall through to text mode if voice init failed
+  }
+
+  // ── Text mode (default) ───────────────────────────────────────────────────
   console.log(chalk.gray('Type your questions. Use Ctrl+C or type "exit" to quit.'));
   console.log('');
 
@@ -482,7 +539,11 @@ async function talkto(targetPath: string, options: TalktoOptions): Promise<void>
   prompt();
 }
 
-async function handleQuery(bridge: EngineBridge, query: string): Promise<void> {
+async function handleQuery(
+  bridge: EngineBridge,
+  query: string,
+  voice?: import('./voice/index.js').VoiceManager
+): Promise<void> {
   const sources: Array<{ file: string; lines?: string }> = [];
 
   console.log('');
@@ -499,11 +560,13 @@ async function handleQuery(bridge: EngineBridge, query: string): Promise<void> {
         const c = chunk as StreamChunk['data'];
         if (c.type === 'token' && c.content) {
           process.stdout.write(c.content);
+          voice?.feedToken(c.content);
         } else if (c.type === 'source' && c.source) {
           sources.push(c.source);
         }
       }
     );
+    voice?.flushSpeech();
 
     console.log('');
 

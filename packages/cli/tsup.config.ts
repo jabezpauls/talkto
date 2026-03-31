@@ -11,6 +11,8 @@ export default defineConfig({
   sourcemap: true,
   target: 'node18',
   shims: true,
+  // @fugood/whisper.node is a native addon — must not be bundled
+  external: ['@fugood/whisper.node'],
   banner: {
     js: '#!/usr/bin/env node'
   }
