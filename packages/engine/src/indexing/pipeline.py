@@ -20,6 +20,12 @@ from ..protocol.errors import IndexingError
 logger = logging.getLogger(__name__)
 
 
+def _batch_list(lst, size):
+    """Split a list into sub-lists of at most `size` items."""
+    for i in range(0, len(lst), size):
+        yield lst[i:i + size]
+
+
 class IndexingPipeline:
     """Full indexing pipeline: load -> chunk -> embed -> store"""
 
@@ -137,9 +143,13 @@ class IndexingPipeline:
                     result.files_skipped += 1
                     continue
 
-                # Generate embeddings
+                # Generate embeddings in batches to avoid overwhelming API providers
                 chunk_texts = [c["content"] for c in chunks]
-                embeddings = self.embedding.embed_batch(chunk_texts)
+                batch_size = self.config.get("embedding", {}).get("batch_size", 50)
+                embeddings = []
+                for batch in _batch_list(chunk_texts, batch_size):
+                    batch_embeddings = self.embedding.embed_batch(batch)
+                    embeddings.extend(batch_embeddings)
 
                 all_chunks.extend(chunks)
                 all_embeddings.extend(embeddings)

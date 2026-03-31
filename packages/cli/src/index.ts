@@ -37,6 +37,15 @@ program
   .option('--init', 'Create example config file')
   .action(configCommand);
 
+// Indexes subcommand
+program
+  .command('indexes')
+  .description('List and manage stored indexes')
+  .option('--clean', 'Remove old indexes')
+  .option('--older-than <days>', 'Remove indexes older than N days (default: 30)', '30')
+  .option('--yes', 'Skip confirmation prompt')
+  .action(indexesCommand);
+
 program.parse();
 
 async function configCommand(options: { init?: boolean }): Promise<void> {

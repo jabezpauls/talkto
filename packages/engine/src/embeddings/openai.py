@@ -3,6 +3,7 @@ OpenAI embedding provider.
 """
 
 import os
+import time
 import logging
 from typing import List
 import numpy as np
@@ -62,20 +63,31 @@ class OpenAIEmbedding(BaseEmbedding):
             raise EmbeddingError(f"Failed to generate embedding: {e}")
 
     def embed_batch(self, texts: List[str]) -> np.ndarray:
-        """Generate embeddings for multiple texts"""
-        try:
-            # OpenAI supports batch embedding
-            response = self.client.embeddings.create(
-                model=self.model,
-                input=texts
-            )
+        """Generate embeddings for multiple texts with retry on rate limits."""
+        max_retries = 3
+        delay = 1.0
 
-            # Sort by index to ensure correct order
-            embeddings = [None] * len(texts)
-            for item in response.data:
-                embeddings[item.index] = item.embedding
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.embeddings.create(
+                    model=self.model,
+                    input=texts
+                )
+                # Sort by index to ensure correct order
+                embeddings = [None] * len(texts)
+                for item in response.data:
+                    embeddings[item.index] = item.embedding
+                return np.array(embeddings, dtype=np.float32)
 
-            return np.array(embeddings, dtype=np.float32)
-
-        except Exception as e:
-            raise EmbeddingError(f"Failed to generate batch embeddings: {e}")
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = "rate_limit" in err_str or "429" in err_str
+                if is_rate_limit and attempt < max_retries:
+                    logger.warning(
+                        f"Rate limit hit, retrying in {delay:.0f}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                raise EmbeddingError(f"Failed to generate batch embeddings: {e}")

@@ -1,7 +1,10 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    'scripts/postinstall': 'src/scripts/postinstall.ts',
+  },
   format: ['esm'],
   dts: true,
   clean: true,

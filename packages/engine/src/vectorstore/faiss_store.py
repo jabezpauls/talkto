@@ -155,8 +155,8 @@ class FAISSStore:
     def delete_by_file(self, file_path: str) -> int:
         """
         Delete all chunks from a specific file.
-        Note: FAISS doesn't support efficient deletion,
-        so we mark as deleted in metadata.
+        Marks chunks as deleted in metadata and triggers compaction
+        when more than 20% of vectors are soft-deleted.
 
         Args:
             file_path: Path to file
@@ -164,7 +164,59 @@ class FAISSStore:
         Returns:
             Number of chunks deleted
         """
-        return self.metadata.delete_by_file(file_path)
+        deleted = self.metadata.delete_by_file(file_path)
+        if deleted > 0:
+            total = self.index.ntotal
+            deleted_total = self.metadata.get_deleted_chunk_count()
+            if total > 0 and deleted_total / total > 0.2:
+                self.compact()
+        return deleted
+
+    def compact(self) -> int:
+        """
+        Rebuild the FAISS index removing all soft-deleted vectors.
+
+        Reconstructs live vectors from the existing index, builds a fresh
+        IndexFlatIP, and rewrites metadata with sequential IDs.
+
+        Returns:
+            Number of deleted vectors removed.
+        """
+        deleted_count = self.metadata.get_deleted_chunk_count()
+        if deleted_count == 0:
+            return 0
+
+        active_chunks = self.metadata.get_all_active_chunks()  # [(old_id, row_dict), ...]
+
+        if not active_chunks:
+            # Every vector was deleted — reset to empty index
+            self._index = self.faiss.IndexFlatIP(self.dimension)
+            self.metadata.clear()
+            self.save()
+            logger.info(f"Compacted index: removed all {deleted_count} deleted vectors")
+            return deleted_count
+
+        # Reconstruct active vectors from the existing FAISS index
+        vectors = np.zeros((len(active_chunks), self.dimension), dtype=np.float32)
+        for new_id, (old_id, _) in enumerate(active_chunks):
+            self.index.reconstruct(old_id, vectors[new_id])
+
+        # Build a fresh index containing only active vectors
+        new_index = self.faiss.IndexFlatIP(self.dimension)
+        new_index.add(vectors)
+        self._index = new_index
+
+        # Rebuild metadata with new sequential IDs (0, 1, 2, ...)
+        self.metadata.rebuild(
+            [(new_id, row) for new_id, (_, row) in enumerate(active_chunks)]
+        )
+
+        self.save()
+        logger.info(
+            f"Compacted index: removed {deleted_count} deleted vectors, "
+            f"{len(active_chunks)} active vectors remain"
+        )
+        return deleted_count
 
     def get_indexed_files(self) -> List[Dict[str, Any]]:
         """Get list of all indexed files with their hashes"""

@@ -69,6 +69,10 @@ class CommandHandler:
             return self._handle_query(request)
         elif action == "config":
             return self._handle_config(request)
+        elif action == "list_indexes":
+            return self._handle_list_indexes(request)
+        elif action == "delete_index":
+            return self._handle_delete_index(request)
         else:
             raise EngineError("UNKNOWN_ACTION", f"Unknown action: {action}")
 
@@ -140,6 +144,63 @@ class CommandHandler:
             top_k=options.get("topK", 5)
         ):
             yield chunk
+
+    def _handle_list_indexes(self, request: Request) -> Dict[str, Any]:
+        """List all stored indexes with metadata."""
+        from pathlib import Path
+        import sqlite3
+
+        indexes_path = Path.home() / ".talkto" / "indexes"
+        if not indexes_path.exists():
+            return {"indexes": []}
+
+        indexes = []
+        for index_dir in sorted(indexes_path.iterdir()):
+            if not index_dir.is_dir():
+                continue
+            meta_db = index_dir / "meta.db"
+            if not meta_db.exists():
+                continue
+            try:
+                conn = sqlite3.connect(str(meta_db))
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT MAX(indexed_at) as last_indexed, "
+                    "COUNT(*) as chunk_count FROM chunks WHERE deleted = 0"
+                )
+                row = cursor.fetchone()
+                cursor.execute("SELECT COUNT(*) as file_count FROM files")
+                file_row = cursor.fetchone()
+                conn.close()
+                indexes.append({
+                    "hash": index_dir.name,
+                    "last_indexed": row["last_indexed"],
+                    "chunk_count": row["chunk_count"],
+                    "file_count": file_row["file_count"],
+                })
+            except Exception as e:
+                logger.warning(f"Could not read index metadata for {index_dir.name}: {e}")
+
+        return {"indexes": indexes}
+
+    def _handle_delete_index(self, request: Request) -> Dict[str, Any]:
+        """Delete a stored index by hash."""
+        import shutil
+        from pathlib import Path
+
+        options = request.options
+        index_hash = options.get("hash")
+        if not index_hash:
+            raise EngineError("MISSING_HASH", "Index hash is required")
+
+        index_dir = Path.home() / ".talkto" / "indexes" / index_hash
+        if not index_dir.exists():
+            raise EngineError("NOT_FOUND", f"Index not found: {index_hash}")
+
+        shutil.rmtree(str(index_dir))
+        logger.info(f"Deleted index: {index_hash}")
+        return {"success": True, "deleted": index_hash}
 
     def _handle_config(self, request: Request) -> Dict[str, Any]:
         """Handle config command"""

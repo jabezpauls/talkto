@@ -210,6 +210,51 @@ class MetadataStore:
         cursor.execute("SELECT * FROM files")
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_deleted_chunk_count(self) -> int:
+        """Return the number of soft-deleted chunks."""
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) FROM chunks WHERE deleted = 1")
+        return cursor.fetchone()[0]
+
+    def get_all_active_chunks(self) -> List[tuple]:
+        """
+        Return all non-deleted chunks ordered by their vector ID.
+
+        Returns:
+            List of (vector_id, row_dict) tuples.
+        """
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM chunks WHERE deleted = 0 ORDER BY id")
+        return [(row["id"], dict(row)) for row in cursor.fetchall()]
+
+    def rebuild(self, new_chunks: List[tuple]) -> None:
+        """
+        Replace all chunk records with fresh sequential IDs.
+        Used after FAISS index compaction.
+
+        Args:
+            new_chunks: List of (new_id, row_dict) tuples.
+        """
+        cursor = self.connection.cursor()
+        cursor.execute("DELETE FROM chunks")
+        for new_id, row in new_chunks:
+            cursor.execute("""
+                INSERT INTO chunks
+                (id, chunk_id, file, lines, language, chunk_type, content_hash, content, indexed_at, deleted)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            """, (
+                new_id,
+                row["chunk_id"],
+                row["file"],
+                row["lines"],
+                row["language"],
+                row["chunk_type"],
+                row["content_hash"],
+                row["content"],
+                row["indexed_at"]
+            ))
+        self.connection.commit()
+
     def clear(self) -> None:
         """Clear all data"""
         cursor = self.connection.cursor()

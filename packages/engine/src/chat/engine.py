@@ -32,6 +32,7 @@ class RAGChatEngine:
         self.max_context_tokens = 4000
         self._retriever: Optional[Retriever] = None
         self._llm = None
+        self._enc = None
 
     def _get_index_path(self) -> str:
         """Get the index path for the project"""
@@ -175,7 +176,7 @@ class RAGChatEngine:
                 chunk_text += f", lines {chunk['lines']}"
             chunk_text += f"]\n{chunk['content']}\n"
 
-            chunk_tokens = len(chunk_text) // 4  # Rough token estimate
+            chunk_tokens = self._count_tokens(chunk_text)
             if total_tokens + chunk_tokens > self.max_context_tokens:
                 break
 
@@ -183,6 +184,13 @@ class RAGChatEngine:
             total_tokens += chunk_tokens
 
         return "\n---\n".join(context_parts)
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens using tiktoken (cl100k_base encoding)."""
+        if self._enc is None:
+            import tiktoken
+            self._enc = tiktoken.get_encoding("cl100k_base")
+        return len(self._enc.encode(text))
 
     def _format_sources(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Format sources for response"""
