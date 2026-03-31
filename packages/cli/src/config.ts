@@ -10,9 +10,15 @@ export interface ProviderConfig {
   base_url?: string;
 }
 
+export interface IndexConfig {
+  chunk_size?: number;
+  chunk_overlap?: number;
+}
+
 export interface TalktoConfig {
   embedding?: ProviderConfig;
   llm?: ProviderConfig;
+  index?: IndexConfig;
 }
 
 const DEFAULT_CONFIG: TalktoConfig = {
@@ -51,6 +57,7 @@ export function loadGlobalConfig(): TalktoConfig {
     return {
       embedding: { ...DEFAULT_CONFIG.embedding, ...userConfig?.embedding },
       llm: { ...DEFAULT_CONFIG.llm, ...userConfig?.llm },
+      ...(userConfig?.index ? { index: userConfig.index } : {}),
     };
   } catch {
     return DEFAULT_CONFIG;

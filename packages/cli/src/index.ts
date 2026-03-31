@@ -384,6 +384,7 @@ async function talkto(targetPath: string, options: TalktoOptions): Promise<void>
             api_key: globalConfig.llm?.api_key,
             base_url: globalConfig.llm?.base_url,
           },
+          ...(globalConfig.index ? { index: globalConfig.index } : {}),
         },
       },
     });
